@@ -1,87 +1,81 @@
-# score-implementation-sample
+# Score Andromeda POC
 
-This score-implementation-sample is a template repo for creating a new Score implementation following the conventions laid out in [Score Compose](https://github.com/score-spec/score-compose) and [Score K8s](https://github.com/score-spec/score-k8s).
+This project demonstrates how to convert [Score YAML](https://score.dev/) workload definitions into Knative Service manifests, with secure environment variable wiring and resource provisioning for cloud-native applications.
 
-This sample comes complete with:
+## Features
 
-1. CLI skeleton including `init` and`generate` subcommands
-    - `generate --overrides-file` and `generate --override-property` for applying Score overrides before conversion
-    - `generate --image` for overriding the workload image before conversion.
-    - Full placeholder support for `${metadata...}` and `${resource...}` expressions in the workload variables, files, and resource params.
-2. State directory storage in `.score-implementation-sample/`
-3. `TODO` in place of resource provisioning and workload conversion
+- **Knative Service Generation**: Converts Score YAML to Knative Service manifests (no Kubernetes Service generated).
+- **Cluster-Local Support**: Adds `serving.knative.dev/visibility: cluster-local` label if `applyClusterLocal` is set.
+- **Port Mapping**: Automatically extracts and maps service ports from Score YAML to Knative container ports.
+- **Secret-Aware Environment Variables**: Wires up environment variables from provisioned resources (e.g., Postgres, S3) using Kubernetes `secretKeyRef`.
+- **Resource Provisioners**: Supports custom resources like `SQLDatabase` and `ObjectStorage` with secret output wiring.
 
-To adapt this for your target platform, you should:
+## Usage
 
-1. Fork the repo or use the "use as template" button in Github (this flattens the commit history)
-    ![use-as-template](use-template-screenshot.png)
-2. Rename the go module by replacing all instances of `github.com/score-spec/score-implementation-sample` with your own module name.
-3. Replace all other instances of `score-implementation-sample` with your own `score-xyz` name including renaming the `cmd/score-implementation-sample` directory.
-4. Run the tests with `go test -v ./...`.
-5. Change the `TODO` in [provisioning.go](./internal/provisioners/provisioning.go) to provision resources and set the resource outputs. The existing implementation resolves placeholders in the resource params but does not set any resource outputs.
-6. Change the `TODO` in [convert.go](./internal/convert/convert.go) to convert workloads into the target manifest form. The existing implementation resolves placeholders in the variables and files sections but just returns the workload spec as yaml content in the manifests.
+1. **Prepare your Score YAML**
+   - Define your workload, ports, and resources in `score.yaml`.
 
-Good luck, and have fun!
+2. **Run the Converter**
+   - Use the CLI or call the main function in `internal/convert/workloads.go` to generate manifests:
 
-## Demo
+    ```sh
+    make build
+    ```
 
-Write the following to `score.yaml`:
+    or
 
-```yaml
-apiVersion: score.dev/v1b1
-metadata:
-    name: example
-containers:
-    main:
-        image: stefanprodan/podinfo
-        variables:
-            key: value
-            dynamic: ${metadata.name}
-        files:
-        - target: /somefile
-          content: |
-            ${metadata.name}
-resources:
-    thing:
-        type: something
-        params:
-          x: ${metadata.name}
-```
+    ```sh
+    go run ./cmd/score-andromeda/main.go -f score.yaml > manifests.yaml
+    ```
 
-And run:
+3. **Review the Output**
+   - The generated `manifests.yaml` will contain:
+     - Knative Service manifest with correct ports and env vars
+     - Resource manifests (e.g., SQLDatabase, ObjectStorage)
+     - Secret references for environment variables
 
-```sh
-go run ./cmd/score-xyz init
-go run ./cmd/score-xyz generate score.yaml
-```
+4. **Apply to Your Cluster**
+   - Deploy the generated manifests to your Kubernetes/Knative cluster:
 
-The output `manifests.yaml` contains the following which indicates:
+     ```sh
+     kubectl apply -f manifests.yaml
+     ```
 
-1. Resources were "provisioned" and their parameters interpolated.
-2. Workloads were converted by copying them to the output manifests with variables or files interpolated as required.
+## Example
+
+Given a `score.yaml` with a Postgres and S3 resource, the generated Knative Service will have environment variables like:
 
 ```yaml
-apiVersion: score.dev/v1b1
-metadata:
-    name: example
-containers:
-    main:
-        files:
-            - content: |
-                example
-              noExpand: true
-              target: /somefile
-        image: stefanprodan/podinfo
-        variables:
-            dynamic: example
-            key: value
-resources:
-    thing:
-        params:
-            x: example
-        type: something
+- name: PG_CONNECTION_STRING
+  value: postgresql://$(USERNAME):$(PASSWORD)@$(HOST):$(PORT)/$(DATABASE)
+- name: BUCKET_ENDPOINT
+  valueFrom:
+    secretKeyRef:
+      name: bucket-tutorial-app-bucket-connection-creds
+      key: endpoint
 ```
 
-## A note on licensing
+## Secret-Aware Substitution
 
-Most code files here retain the Apache licence header since they were copied or adapted from the reference `score-compose` which is Apache licensed. Any modifications to these files should retain the Apache licence and attribution.
+The function `buildSecretAwareSubstitutionFn` replaces variables in environment values with references to Kubernetes secrets. For example:
+
+- Input: `postgresql://$(USERNAME):$(PASSWORD)@$(HOST):$(PORT)/$(DATABASE)`
+- Output: `postgresql://$(__ref_abc):$(__ref_xyz)@$(__ref_host):$(__ref_port)/$(__ref_db)`
+  (with each `__ref_*` wired to the correct `secretKeyRef`)
+
+## Project Structure
+
+- `cmd/score-andromeda/main.go` — CLI entrypoint
+- `internal/convert/workloads.go` — Main conversion logic
+- `internal/provisioners/` — Resource provisioners (e.g., S3, Postgres)
+- `manifests.yaml` — Example output
+- `score.yaml` — Example input
+
+## Requirements
+
+- Go 1.20+
+- Kubernetes cluster with Knative Serving installed
+
+## License
+
+MIT

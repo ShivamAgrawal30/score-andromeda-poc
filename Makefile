@@ -12,7 +12,7 @@ help:
 .FORCE:
 
 build:
-	go build ./cmd/score-implementation-sample/
+	go build ./cmd/score-andromeda/
 
 test:
 	go vet ./...    

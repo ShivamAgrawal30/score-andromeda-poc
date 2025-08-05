@@ -1,0 +1,115 @@
+---
+apiVersion: andromeda.nn.nl/v1alpha1
+kind: IRSA
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "-1"
+    name: tutorial-app
+spec:
+    deletionPolicy: Delete
+---
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+    name: tutorial-app
+spec:
+    template:
+        metadata: {}
+        spec:
+            containers:
+                - env:
+                    - name: __ref_0GkkufDeZgZ9ku1P0kZVpw
+                      valueFrom:
+                        secretKeyRef:
+                            key: username
+                            name: pg-tutorial-app-db-connection-creds
+                    - name: __ref_86e7xBZni93laOOcyANLQQ
+                      valueFrom:
+                        secretKeyRef:
+                            key: host
+                            name: pg-tutorial-app-db-connection-creds
+                    - name: __ref_86goUV1ni93laOOc9HFRxg
+                      valueFrom:
+                        secretKeyRef:
+                            key: port
+                            name: pg-tutorial-app-db-connection-creds
+                    - name: __ref_OXev7bTeZgY9rkAT0oX8bA
+                      valueFrom:
+                        secretKeyRef:
+                            key: database
+                            name: pg-tutorial-app-db-connection-creds
+                    - name: __ref_m8iQDK3eZgZxzB13BdPwlA
+                      valueFrom:
+                        secretKeyRef:
+                            key: password
+                            name: pg-tutorial-app-db-connection-creds
+                    - name: BUCKET_ENDPOINT
+                      valueFrom:
+                        secretKeyRef:
+                            key: endpoint
+                            name: bucket-tutorial-app-bucket-connection-creds
+                    - name: BUCKET_NAME
+                      valueFrom:
+                        secretKeyRef:
+                            key: bucket
+                            name: bucket-tutorial-app-bucket-connection-creds
+                    - name: BUCKET_REGION
+                      valueFrom:
+                        secretKeyRef:
+                            key: region
+                            name: bucket-tutorial-app-bucket-connection-creds
+                    - name: ENABLE_ASSISTANT
+                      value: "false"
+                    - name: PG_CONNECTION_STRING
+                      value: postgresql://$(__ref_0GkkufDeZgZ9ku1P0kZVpw):$(__ref_m8iQDK3eZgZxzB13BdPwlA)@$(__ref_86e7xBZni93laOOcyANLQQ):$(__ref_86goUV1ni93laOOc9HFRxg)/$(__ref_OXev7bTeZgY9rkAT0oX8bA)
+                  image: 074208675508.dkr.ecr.eu-west-1.amazonaws.com/tutorial-app:latest
+                  name: app
+                  ports:
+                    - containerPort: 80
+                      protocol: TCP
+                  resources:
+                    limits:
+                        cpu: "1"
+                        memory: 800Mi
+                    requests:
+                        cpu: "1"
+                        memory: 500Mi
+            serviceAccountName: tutorial-app
+---
+apiVersion: andromeda.nn.nl/v1alpha1
+kind: SQLDatabase
+metadata:
+    annotations:
+        andromeda.score.dev/resource-guid: 7c74e488-ea9e-4193-3c66-4534cdfaf368
+        andromeda.score.dev/resource-uid: postgres.default#tutorial-app.db
+        andromeda.score.dev/source-workload: tutorial-app
+        argocd.argoproj.io/sync-wave: "0"
+    labels:
+        app.kubernetes.io/instance: pg-tutorial-app
+        app.kubernetes.io/managed-by: score-andromeda
+        app.kubernetes.io/name: pg-tutorial-app
+    name: pg-tutorial-app
+spec:
+    engine: PostgreSQL
+    writeConnectionSecretToRef:
+        name: pg-tutorial-app-db-connection-creds
+---
+apiVersion: andromeda.nn.nl/v1alpha1
+kind: ObjectStorage
+metadata:
+    annotations:
+        argocd.argoproj.io/sync-wave: "0"
+        k8s.score.dev/resource-guid: a8a4eef7-d436-4ef2-95ea-f71108b29c53
+        k8s.score.dev/resource-uid: s3.default#tutorial-app.bucket
+        k8s.score.dev/source-workload: tutorial-app
+    labels:
+        app.kubernetes.io/instance: bucket-tutorial-app
+        app.kubernetes.io/managed-by: score-k8s
+        app.kubernetes.io/name: bucket-tutorial-app
+    name: bucket-tutorial-app
+spec:
+    access:
+        irsas:
+            - tutorial-app
+    writeConnectionSecretToRef:
+        name: bucket-tutorial-app-bucket-connection-creds
