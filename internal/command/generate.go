@@ -30,9 +30,9 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"github.com/score-spec/score-implementation-sample/internal/convert"
-	"github.com/score-spec/score-implementation-sample/internal/provisioners"
-	"github.com/score-spec/score-implementation-sample/internal/state"
+	"github.com/score-spec/score-andromeda/internal/convert"
+	"github.com/score-spec/score-andromeda/internal/provisioners"
+	"github.com/score-spec/score-andromeda/internal/state"
 )
 
 const (
@@ -124,6 +124,49 @@ var generateCmd = &cobra.Command{
 				return fmt.Errorf("failed to add score file to project: %s: %w", arg, err)
 			}
 			slog.Info("Added score file to project", "file", arg)
+			// 🔗 Link declared resources to workload
+			if workloadName, ok := workload.Metadata["name"].(string); ok {
+				for declaredID := range workload.Resources {
+					resUID := framework.ResourceUid(declaredID)
+					if res, found := currentState.Resources[resUID]; found {
+						res.SourceWorkload = workloadName
+						currentState.Resources[resUID] = res
+						slog.Info(fmt.Sprintf("🔗 Linked declared resource '%s' to workload '%s'", resUID, workloadName))
+					}
+				}
+			}
+
+			var workloadName string
+			if n, ok := workload.Metadata["name"].(string); ok {
+				workloadName = n
+			} else {
+				return fmt.Errorf("workload metadata is missing 'name' field")
+			}
+
+			declaredResources := map[string]bool{}
+			if rawResources, ok := rawWorkload["resources"].(map[string]interface{}); ok {
+				for resID := range rawResources {
+					declaredResources[resID] = true
+				}
+			}
+
+			for resUID, res := range currentState.Resources {
+				if res.SourceWorkload == workloadName {
+					// Compare against declared resource names, not res.Id
+					found := false
+					for declaredID := range declaredResources {
+						if resUID == framework.ResourceUid(declaredID) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						slog.Info(fmt.Sprintf("Pruning undeclared resource '%s' from workload '%s'", resUID, res.SourceWorkload))
+						delete(currentState.Resources, resUID)
+					}
+				}
+			}
+
 		}
 
 		if len(currentState.Workloads) == 0 {
@@ -142,19 +185,75 @@ var generateCmd = &cobra.Command{
 			return fmt.Errorf("failed to provision resources: %w", err)
 		}
 
+		for workloadName := range currentState.Workloads {
+			resOutputs, _ := currentState.GetResourceOutputForWorkload(workloadName)
+			slog.Info(fmt.Sprintf("Resolved outputs for workload '%s': %+v", workloadName, resOutputs))
+		}
+
+		for resUID, res := range currentState.Resources {
+			slog.Info(fmt.Sprintf("Resource '%s' outputs: %v", resUID, res.Outputs))
+		}
+
 		sd.State = *currentState
 		if err := sd.Persist(); err != nil {
 			return fmt.Errorf("failed to persist state file: %w", err)
 		}
 		slog.Info("Persisted state file")
 
+		// for workloadName := range currentState.Workloads {
+		// 	if manifests, err := convert.Workload(currentState, workloadName); err != nil {
+		// 		return fmt.Errorf("failed to convert workloads: %w", err)
+		// 	} else {
+		// 		outputManifests = append(outputManifests, manifests...)
+		// 	}
+		// 	slog.Info(fmt.Sprintf("Wrote manifest to manifests buffer for workload '%s'", workloadName))
+		// }
+
+		// for resUid, res := range currentState.Resources {
+		// 	for _, obj := range res.Extras.Manifest {
+		// 		if manifestMap, ok := obj.(map[string]interface{}); ok {
+		// 			outputManifests = append(outputManifests, manifestMap)
+		// 			slog.Info(fmt.Sprintf("Appended manifest from resource '%s'", resUid))
+		// 		} else {
+		// 			slog.Warn(fmt.Sprintf("Skipping non-map manifest in resource '%s'", resUid))
+		// 		}
+		// 	}
+		// }
 		for workloadName := range currentState.Workloads {
-			if manifest, err := convert.Workload(currentState, workloadName); err != nil {
-				return fmt.Errorf("failed to convert workloads: %w", err)
-			} else {
-				outputManifests = append(outputManifests, manifest)
+			resOutputs, _ := currentState.GetResourceOutputForWorkload(workloadName)
+			slog.Info(fmt.Sprintf("Resolved outputs for workload '%s': %+v", workloadName, resOutputs))
+		}
+		for workloadName := range currentState.Workloads {
+			manifests, err := convert.Workload(currentState, workloadName)
+			
+			if err != nil {
+				return fmt.Errorf("failed to convert workload '%s': %w", workloadName, err)
 			}
-			slog.Info(fmt.Sprintf("Wrote manifest to manifests buffer for workload '%s'", workloadName))
+			for _, manifestMap := range manifests {
+				mSig := buildManifestSignature(manifestMap)
+				outputManifests = slices.DeleteFunc(outputManifests, func(other map[string]interface{}) bool {
+					return buildManifestSignature(other) == mSig
+				})
+				outputManifests = append(outputManifests, manifestMap)
+			}
+			slog.Info(fmt.Sprintf("Wrote %d manifests to buffer for workload '%s'", len(manifests), workloadName))
+		}
+
+		resIds, _ := currentState.GetSortedResourceUids()
+		for _, resUid := range resIds {
+			res := currentState.Resources[resUid]
+			for _, obj := range res.Extras.Manifest {
+				if manifestMap, ok := obj.(map[string]interface{}); ok {
+					mSig := buildManifestSignature(manifestMap)
+					outputManifests = slices.DeleteFunc(outputManifests, func(other map[string]interface{}) bool {
+						return buildManifestSignature(other) == mSig
+					})
+					outputManifests = append(outputManifests, manifestMap)
+					slog.Info(fmt.Sprintf("Appended manifest for resource '%s'", resUid))
+				} else {
+					slog.Warn(fmt.Sprintf("Skipping non-map manifest in resource '%s'", resUid))
+				}
+			}
 		}
 
 		out := new(bytes.Buffer)
@@ -217,6 +316,15 @@ func parseAndApplyOverrideProperty(entry string, flagName string, spec map[strin
 		}
 		return after, nil
 	}
+}
+
+func buildManifestSignature(n map[string]interface{}) string {
+	apiVersion, _ := n["apiVersion"].(string)
+	kind, _ := n["kind"].(string)
+	metadata, _ := n["metadata"].(map[string]interface{})
+	namespace, _ := metadata["namespace"].(string)
+	name, _ := metadata["name"].(string)
+	return fmt.Sprintf("%s/%s/%s/%s", apiVersion, kind, namespace, name)
 }
 
 func init() {

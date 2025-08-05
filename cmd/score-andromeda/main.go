@@ -12,28 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package command
+package main
 
 import (
-	"log/slog"
+	"fmt"
+	"os"
 
-	"github.com/spf13/cobra"
+	"github.com/score-spec/score-andromeda/internal/command"
 )
 
-var rootCmd = &cobra.Command{
-	Use:           "score-andromeda",
-	SilenceErrors: true,
-	CompletionOptions: cobra.CompletionOptions{
-		HiddenDefaultCmd: true,
-	},
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		slog.SetDefault(slog.New(slog.NewTextHandler(cmd.ErrOrStderr(), &slog.HandlerOptions{
-			Level: slog.LevelDebug, AddSource: true,
-		})))
-		return nil
-	},
-}
-
-func Execute() error {
-	return rootCmd.Execute()
+func main() {
+	if err := command.Execute(); err != nil {
+		_, _ = fmt.Fprintln(os.Stderr, "Error: "+err.Error())
+		os.Exit(1)
+	}
 }

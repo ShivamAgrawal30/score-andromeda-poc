@@ -1,0 +1,33 @@
+apiVersion: score.dev/v1b1
+metadata:
+  name: tutorial-app
+containers:
+  app:
+    image: .
+    variables:
+      ENABLE_ASSISTANT: "false"
+      PG_CONNECTION_STRING: "postgresql://${resources.db.username}:${resources.db.password}@${resources.db.host}:${resources.db.port}/${resources.db.database}"
+      BUCKET_ENDPOINT: ${resources.bucket.endpoint}
+      BUCKET_REGION: ${resources.bucket.region}
+      BUCKET_NAME: ${resources.bucket.bucket}
+    resources:
+      limits:
+        memory: "800Mi"
+        cpu: "1000m"
+      requests:
+        memory: "500Mi"
+        cpu: "1000m"
+service:
+  ports:
+    http:
+      port: 80
+      targetPort: 80
+resources:
+  dns:
+    type: dns
+  route:
+    type: route
+  db:
+    type: postgres
+  bucket:
+    type: s3
